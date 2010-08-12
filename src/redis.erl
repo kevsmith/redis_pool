@@ -78,22 +78,8 @@ init(Opts) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({q, Parts}, _From, State) ->
-    case connect(State) of
-        {ok, Socket} ->
-            case send(Socket, Parts) of
-                ok ->
-                    case read_resp(Socket) of
-                        {error, Error} ->
-                            {reply, {error, Error}, State#state{socket = undefined}};
-                        Response ->
-                            {reply, Response, State#state{socket = Socket}}
-                    end;
-                Error ->
-                    {reply, Error, State#state{socket = undefined}}
-            end;
-        Error ->
-            {reply, Error, State#state{socket = undefined}}
-    end.
+    {Result, State1} = do_q(Parts, State),
+    {reply, Result, State1}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -133,6 +119,26 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+do_q(Parts, State) ->
+    case connect(State) of
+        {ok, Socket} ->
+            case send(Socket, Parts) of
+                ok ->
+                    case read_resp(Socket) of
+                        {error, Error} ->
+                            {{error, Error}, State#state{socket = undefined}};
+                        Response ->
+                            {Response, State#state{socket = Socket}}
+                    end;
+                Error ->
+                    {Error, State#state{socket = undefined}}
+            end;
+        {error, closed} ->
+            do_q(Parts, State#state{socket = undefined});
+        Error ->
+            {Error, State#state{socket = undefined}}
+    end.
+    
 parse_options([], State) ->
     State;
 parse_options([{ip, Ip} | Rest], State) ->
