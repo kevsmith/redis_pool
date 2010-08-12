@@ -1,0 +1,3 @@
+#!/bin/sh
+
+erl -name redis-console@`hostname -s` -pa ebin -boot release/redis-1.0

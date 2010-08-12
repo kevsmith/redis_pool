@@ -1,12 +1,12 @@
 #!/usr/bin/env escript
 %% -*- erlang -*-
-%%! -pa ebin/ -boot start_sasl
+%%! -pa ebin
 
 main(_) ->
-
-  %% Devil Redis
-  redis:start_link([{port, 6660}]),
   etap:plan(unknown),
+  
+  application:start(sasl),
+  application:start(redis),
 
   %% Test flushdb first to ensure we have a clean db
   etap:is(
@@ -40,8 +40,8 @@ main(_) ->
   ),
 
   etap:is(
-    redis:q([keys, "notamatch"]),
-    {ok, <<>>},
+    redis:keys("notamatch"),
+    [],
     "test bulk reply with 0 length"
   ),
 
@@ -53,7 +53,7 @@ main(_) ->
   ),
 
   etap:is(
-    redis:keys("*"),
+    redis:keys(),
     [<<"foo">>, <<"abc">>],
     "keys sugar"
   ),
