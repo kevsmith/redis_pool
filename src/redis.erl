@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/1, init/1, handle_call/3, handle_cast/2, 
+-export([init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
 -export([q/1, keys/0, keys/1, set/2, get/1]).
@@ -18,26 +18,28 @@
 }).
 
 %% API functions
-start_link(Opts) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
-
 q(Parts) ->
-    gen_server:call(?MODULE, {q, Parts}).
+    case redis_pool:pid() of
+        Pid when is_pid(Pid) ->
+            gen_server:call(Pid, {q, Parts});
+        Error ->
+            Error
+    end.
 
 %% Generic Sugar
-keys() -> keys("*").
+keys() -> keys(<<"*">>).
 
-keys(Pat) ->
-    [Data || {ok, Data} <- q([keys, Pat])].
+keys(Pat) when is_binary(Pat) ->
+    [Data || {ok, Data} <- q([<<"KEYS">>, Pat])].
 
 set(Key, Value) when is_binary(Key), is_binary(Value) ->
-    case q([set, Key, Value]) of
+    case q([<<"SET">>, Key, Value]) of
         {ok, Result} -> Result;
         Other -> Other
     end.
 
 get(Key) when is_binary(Key) ->
-    case q([get, Key]) of
+    case q([<<"GET">>, Key]) of
         {ok, Result} -> Result;
         Other -> Other
     end.
@@ -78,11 +80,11 @@ init(Opts) ->
 handle_call({q, Parts}, _From, State) ->
     case connect(State) of
         {ok, Socket} ->
-            case send(Parts, Socket) of
+            case send(Socket, Parts) of
                 ok ->
                     case read_resp(Socket) of
-                        {xerror, Error} ->
-                            {reply, Error, State#state{socket = undefined}};
+                        {error, Error} ->
+                            {reply, {error, Error}, State#state{socket = undefined}};
                         Response ->
                             {reply, Response, State#state{socket = Socket}}
                     end;
@@ -148,14 +150,9 @@ connect(#state{socket=undefined, ip=Ip, port=Port}) ->
 connect(#state{socket = Socket}) ->
     {ok, Socket}.
 
-send(Parts, Socket) ->
+send(Socket, Parts) ->
     ToSend = build_request(Parts),
     gen_tcp:send(Socket, ToSend).
-
-strip(B) when is_binary(B) ->
-    S = size(B) - size(?NL),
-    <<B1:S/binary, _/binary>> = B,
-    B1.
 
 read_resp(Socket) ->
     inet:setopts(Socket, [{packet, line}]),
@@ -177,14 +174,19 @@ read_resp(Socket) ->
                 <<"\r\n">> ->
                     read_resp(Socket);
                 Uknown ->
-                    {unknown, Uknown}
+                    {error, {unknown, Uknown}}
             end;
         Error ->
-            {xerror, Error}
+            Error
     end.
 
+strip(B) when is_binary(B) ->
+    S = size(B) - size(?NL),
+    <<B1:S/binary, _/binary>> = B,
+    B1.
+    
 read_body(_Socket, -1) ->
-    {ok, null};
+    {ok, undefined};
 read_body(_Socket, 0) ->
     {ok, <<>>};
 read_body(Socket, Size) ->
@@ -199,15 +201,7 @@ read_multi_bulk(Socket, Count, Acc) ->
 
 build_request(Args) when is_list(Args) ->
     Count = length(Args),
-    F = fun(V) -> ["$", to_part(length(to_part(V))), ?NL, to_part(V), ?NL] end,
-    Args1 = lists:map(F, Args),
-    ["*", to_part(Count), ?NL, Args1, ?NL].
-
-to_part(A) when is_atom(A) ->
-    string:to_upper(atom_to_list(A));
-to_part(B) when is_binary(B) ->
-    binary_to_list(B);
-to_part(I) when is_integer(I) ->
-    integer_to_list(I);
-to_part(L) when is_list(L) ->
-    L.
+    Args1 = [begin
+        [<<"$">>, integer_to_list(size(Arg)), ?NL, Arg, ?NL]
+     end || Arg <- Args],
+    ["*", integer_to_list(Count), ?NL, Args1, ?NL].

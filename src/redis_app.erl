@@ -16,5 +16,5 @@ stop(_State) ->
 
 init([]) ->
     {ok, {{one_for_one, 5, 10}, [
-        {redis, {redis, start_link, [[]]}, permanent, 2000, worker, [redis]}
+        {redis_pool, {redis_pool, start_link, [[]]}, permanent, 2000, worker, [redis_pool]}
     ]}}.
