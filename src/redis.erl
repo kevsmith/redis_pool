@@ -13,8 +13,8 @@
     ip = "127.0.0.1",
     port = 6379,
     db = 0,
-    pass = <<>>,
-    socket = undefined
+    pass,
+    socket
 }).
 
 %% API functions
@@ -61,8 +61,13 @@ init(Opts) ->
             false -> #state{};
             URL ->
                 case redis_uri:parse(URL) of
-                    {redis, _UserInfo, Host, Port, _Path, _Query} ->
-                        #state{ip = Host, port=Port};
+                    {redis, _UserInfo, Host, Port, Path, _Query} ->
+                        Pass = 
+                            case Path of
+                                "/" -> undefined;
+                                "/" ++ Val -> Val
+                            end,
+                        #state{ip = Host, port = Port, pass = Pass};
                     _ -> ok
                 end
         end,
@@ -122,13 +127,18 @@ code_change(_OldVsn, State, _Extra) ->
 do_q(Parts, State) ->
     case connect(State) of
         {ok, Socket} ->
-            case send(Socket, Parts) of
-                ok ->
-                    case read_resp(Socket) of
-                        {error, Error} ->
-                            {{error, Error}, State#state{socket = undefined}};
-                        Response ->
-                            {Response, State#state{socket = Socket}}
+            case do_auth(Socket, State#state.pass) of
+                {ok, _Msg} ->
+                    case send(Socket, Parts) of
+                        ok ->
+                            case read_resp(Socket) of
+                                {error, Error} ->
+                                    {{error, Error}, State#state{socket = undefined}};
+                                Response ->
+                                    {Response, State#state{socket = Socket}}
+                            end;
+                        Error ->
+                            {Error, State#state{socket = undefined}}
                     end;
                 Error ->
                     {Error, State#state{socket = undefined}}
@@ -155,6 +165,16 @@ connect(#state{socket=undefined, ip=Ip, port=Port}) ->
     gen_tcp:connect(Ip, Port, Opts);
 connect(#state{socket = Socket}) ->
     {ok, Socket}.
+
+do_auth(Socket, Pass) when is_binary(Pass), size(Pass) > 0 ->
+    case gen_tcp:send(Socket, [<<"AUTH ">>, Pass, ?NL]) of
+        ok ->
+            read_resp(Socket);
+        Error ->
+            Error
+    end;
+do_auth(_Socket, _Pass) ->
+    {ok, "not authenticated"}.
 
 send(Socket, Parts) ->
     ToSend = build_request(Parts),
