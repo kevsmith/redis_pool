@@ -56,22 +56,7 @@ get(Key) when is_binary(Key) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init(Opts) ->
-    State0 =
-        case os:getenv("REDIS_URL") of
-            false -> #state{};
-            URL ->
-                case redis_uri:parse(URL) of
-                    {redis, _UserInfo, Host, Port, Path, _Query} ->
-                        Pass = 
-                            case Path of
-                                "/" -> undefined;
-                                "/" ++ Val -> Val
-                            end,
-                        #state{ip = Host, port = Port, pass = Pass};
-                    _ -> ok
-                end
-        end,
-    {ok, parse_options(Opts, State0)}.
+    {ok, init_state(Opts)}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -92,6 +77,15 @@ handle_call({q, Parts}, _From, State) ->
 %%    {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+handle_cast({reconnect, NewOpts}, _State) ->
+    State = init_state(NewOpts),
+    case connect(State) of
+        {ok, Socket} ->
+            {noreply, State#state{socket=Socket}};
+        _ ->
+            {noreply, State}
+    end;
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -124,6 +118,24 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+init_state(Opts) ->
+    State0 =
+        case os:getenv("REDIS_URL") of
+            false -> #state{};
+            URL ->
+                case redis_uri:parse(URL) of
+                    {redis, _UserInfo, Host, Port, Path, _Query} ->
+                        Pass = 
+                            case Path of
+                                "/" -> undefined;
+                                "/" ++ Val -> Val
+                            end,
+                        #state{ip = Host, port = Port, pass = Pass};
+                    _ -> ok
+                end
+        end,
+    parse_options(Opts, State0).
+
 do_q(Parts, State) ->
     case connect(State) of
         {ok, Socket} ->

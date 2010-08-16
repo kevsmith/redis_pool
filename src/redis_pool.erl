@@ -5,7 +5,7 @@
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, 
 	     handle_info/2, terminate/2, code_change/3]).
 
--export([pid/0, expand_pool/1]).
+-export([pid/0, expand_pool/1, cycle_pool/1]).
 
 -record(state, {opts=[], key='$end_of_table'}).
 
@@ -23,6 +23,10 @@ expand_pool(NewSize) when is_integer(NewSize) ->
         _ ->
             ok
     end.
+
+cycle_pool(NewOpts) ->
+    gen_server:cast(?MODULE, {update_opts, NewOpts}),
+    [gen_server:cast(Pid, {reconnect, NewOpts}) || {Pid} <- ets:tab2list(?MODULE)].
 
 %%====================================================================
 %% gen_server callbacks
@@ -86,7 +90,10 @@ handle_call(_Msg, _From, State) ->
 handle_cast({add, Additions}, State) ->
     [start_client(State#state.opts) || _ <- lists:seq(1, Additions)],
     {noreply, State};
-    
+
+handle_cast({update_opts, NewOpts}, State) ->
+    {noreply, State#state{opts=NewOpts}};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
