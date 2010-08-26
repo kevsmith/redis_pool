@@ -21,9 +21,23 @@
 q(Parts) ->
     case redis_pool:pid() of
         Pid when is_pid(Pid) ->
-            gen_server:call(Pid, {q, Parts});
+            q(Pid, Parts, 1);
         Error ->
             Error
+    end.
+
+q(Pid, Parts, Retries) ->
+    case gen_server:call(Pid, {q, Parts}) of
+        {error, closed} ->
+            case Retries > 0 of
+                true ->
+                    gen_server:call(Pid, reconnect),
+                    q(Pid, Parts, Retries-1);
+                false ->
+                    {error, closed}
+            end;
+        Result ->
+            Result
     end.
 
 %% Generic Sugar
@@ -56,7 +70,13 @@ get(Key) when is_binary(Key) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init(Opts) ->
-    {ok, init_state(Opts)}.
+    State = init_state(Opts),
+    case connect(State#state.ip, State#state.port) of
+        {ok, Socket} ->
+            {ok, State#state{socket=Socket}};
+        Error ->
+            {stop, Error}
+    end.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -68,8 +88,25 @@ init(Opts) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({q, Parts}, _From, State) ->
-    {Result, State1} = do_q(Parts, State),
-    {reply, Result, State1}.
+    Result = do_q(Parts, State),
+    {reply, Result, State};
+
+handle_call({reconnect, NewOpts}, _From, State) ->
+    State1 = init_state(NewOpts),
+    case connect(State1#state.ip, State1#state.port) of
+        {ok, Socket} ->
+            {reply, ok, State1#state{socket=Socket}};
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call(reconnect, _From, State) ->
+    case connect(State#state.ip, State#state.port) of
+        {ok, Socket} ->
+            {reply, ok, State#state{socket=Socket}};
+        Error ->
+            {reply, Error, State}
+    end.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -77,15 +114,6 @@ handle_call({q, Parts}, _From, State) ->
 %%    {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({reconnect, NewOpts}, _State) ->
-    State = init_state(NewOpts),
-    case connect(State) of
-        {ok, Socket} ->
-            {noreply, State#state{socket=Socket}};
-        _ ->
-            {noreply, State}
-    end;
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -136,29 +164,12 @@ init_state(Opts) ->
         end,
     parse_options(Opts, State0).
 
-do_q(Parts, State) ->
-    case connect(State) of
-        {ok, Socket} ->
-            case do_auth(Socket, State#state.pass) of
-                {ok, _Msg} ->
-                    case send(Socket, Parts) of
-                        ok ->
-                            case read_resp(Socket) of
-                                {error, Error} ->
-                                    {{error, Error}, State#state{socket = undefined}};
-                                Response ->
-                                    {Response, State#state{socket = Socket}}
-                            end;
-                        Error ->
-                            {Error, State#state{socket = undefined}}
-                    end;
-                Error ->
-                    {Error, State#state{socket = undefined}}
-            end;
-        {error, closed} ->
-            do_q(Parts, State#state{socket = undefined});
+do_q(Parts, #state{socket=Socket}=State) ->
+    case do_auth(Socket, State#state.pass) of
+        {ok, _Msg} ->
+            send_recv(Socket, build_request(Parts));
         Error ->
-            {Error, State#state{socket = undefined}}
+            Error
     end.
     
 parse_options([], State) ->
@@ -172,25 +183,22 @@ parse_options([{db, Db} | Rest], State) ->
 parse_options([{pass, Pass} | Rest], State) ->
     parse_options(Rest, State#state{pass = Pass}).
 
-connect(#state{socket=undefined, ip=Ip, port=Port}) ->
-    Opts = [binary, {active, false}],
-    gen_tcp:connect(Ip, Port, Opts);
-connect(#state{socket = Socket}) ->
-    {ok, Socket}.
+connect(Ip, Port) ->
+    gen_tcp:connect(Ip, Port, [binary, {active, false}, {keepalive, true}]).
 
 do_auth(Socket, Pass) when is_binary(Pass), size(Pass) > 0 ->
-    case gen_tcp:send(Socket, [<<"AUTH ">>, Pass, ?NL]) of
+    send_recv(Socket, [<<"AUTH ">>, Pass, ?NL]);
+
+do_auth(_Socket, _Pass) ->
+    {ok, "not authenticated"}.
+
+send_recv(Socket, Packet) ->
+    case gen_tcp:send(Socket, Packet) of
         ok ->
             read_resp(Socket);
         Error ->
             Error
-    end;
-do_auth(_Socket, _Pass) ->
-    {ok, "not authenticated"}.
-
-send(Socket, Parts) ->
-    ToSend = build_request(Parts),
-    gen_tcp:send(Socket, ToSend).
+    end.
 
 read_resp(Socket) ->
     inet:setopts(Socket, [{packet, line}]),
