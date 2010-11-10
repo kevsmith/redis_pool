@@ -5,21 +5,18 @@
 -export([init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
--export([q/1, keys/0, keys/1, set/2, get/1]).
+-export([q/1, q/2]).
 
 -define(NL, <<"\r\n">>).
 
--record(state, {
-    ip = "127.0.0.1",
-    port = 6379,
-    db = 0,
-    pass,
-    socket
-}).
+-record(state, {ip = "127.0.0.1", port = 6379, db = 0, pass, socket}).
 
 %% API functions
 q(Parts) ->
-    case redis_pool:pid() of
+    q(redis_pool, Parts).
+
+q(Name, Parts) ->
+    case redis_pool:pid(Name) of
         Pid when is_pid(Pid) ->
             q(Pid, Parts, 1);
         Error ->
@@ -31,6 +28,7 @@ q(Pid, Parts, Retries) ->
         {error, closed} ->
             case Retries > 0 of
                 true ->
+                    io:format("redis reconnecting...~n"),
                     gen_server:call(Pid, reconnect),
                     q(Pid, Parts, Retries-1);
                 false ->
@@ -38,24 +36,6 @@ q(Pid, Parts, Retries) ->
             end;
         Result ->
             Result
-    end.
-
-%% Generic Sugar
-keys() -> keys(<<"*">>).
-
-keys(Pat) when is_binary(Pat) ->
-    [Data || {ok, Data} <- q([<<"KEYS">>, Pat])].
-
-set(Key, Value) when is_binary(Key), is_binary(Value) ->
-    case q([<<"SET">>, Key, Value]) of
-        {ok, Result} -> Result;
-        Other -> Other
-    end.
-
-get(Key) when is_binary(Key) ->
-    case q([<<"GET">>, Key]) of
-        {ok, Result} -> Result;
-        Other -> Other
     end.
 
 %%====================================================================
@@ -70,8 +50,8 @@ get(Key) when is_binary(Key) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init(Opts) ->
-    State = init_state(Opts),
-    case connect(State#state.ip, State#state.port) of
+    State = parse_options(Opts, #state{}),
+    case connect(State#state.ip, State#state.port, State#state.pass) of
         {ok, Socket} ->
             {ok, State#state{socket=Socket}};
         Error ->
@@ -92,8 +72,8 @@ handle_call({q, Parts}, _From, State) ->
     {reply, Result, State};
 
 handle_call({reconnect, NewOpts}, _From, State) ->
-    State1 = init_state(NewOpts),
-    case connect(State1#state.ip, State1#state.port) of
+    State1 = parse_options(NewOpts, #state{}),
+    case connect(State1#state.ip, State1#state.port, State#state.pass) of
         {ok, Socket} ->
             {reply, ok, State1#state{socket=Socket}};
         Error ->
@@ -101,7 +81,7 @@ handle_call({reconnect, NewOpts}, _From, State) ->
     end;
 
 handle_call(reconnect, _From, State) ->
-    case connect(State#state.ip, State#state.port) of
+    case connect(State#state.ip, State#state.port, State#state.pass) of
         {ok, Socket} ->
             {reply, ok, State#state{socket=Socket}};
         Error ->
@@ -146,31 +126,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-init_state(Opts) ->
-    State0 =
-        case os:getenv("REDIS_URL") of
-            false -> #state{};
-            URL ->
-                case redis_uri:parse(URL) of
-                    {redis, _UserInfo, Host, Port, Path, _Query} ->
-                        Pass = 
-                            case Path of
-                                "/" -> undefined;
-                                "/" ++ Val -> Val
-                            end,
-                        #state{ip = Host, port = Port, pass = Pass};
-                    _ -> ok
-                end
-        end,
-    parse_options(Opts, State0).
-
-do_q(Parts, #state{socket=Socket}=State) ->
-    case do_auth(Socket, State#state.pass) of
-        {ok, _Msg} ->
-            send_recv(Socket, build_request(Parts));
-        Error ->
-            Error
-    end.
+do_q(Parts, #state{socket=Socket}) ->
+    send_recv(Socket, build_request(Parts)).
     
 parse_options([], State) ->
     State;
@@ -183,8 +140,18 @@ parse_options([{db, Db} | Rest], State) ->
 parse_options([{pass, Pass} | Rest], State) ->
     parse_options(Rest, State#state{pass = Pass}).
 
-connect(Ip, Port) ->
-    gen_tcp:connect(Ip, Port, [binary, {active, false}, {keepalive, true}]).
+connect(Ip, Port, Pass) ->
+    case gen_tcp:connect(Ip, Port, [binary, {active, false}, {keepalive, true}]) of
+        {ok, Sock} when Pass == undefined ->
+            {ok, Sock};
+        {ok, Sock} ->
+            case do_auth(Sock, Pass) of
+                {ok, <<"OK">>} -> {ok, Sock};
+                Err -> Err
+            end;
+        Err ->
+            Err
+    end.
 
 do_auth(Socket, Pass) when is_binary(Pass), size(Pass) > 0 ->
     send_recv(Socket, [<<"AUTH ">>, Pass, ?NL]);
@@ -248,6 +215,7 @@ read_multi_bulk(Socket, Count, Acc) ->
 build_request(Args) when is_list(Args) ->
     Count = length(Args),
     Args1 = [begin
-        [<<"$">>, integer_to_list(size(Arg)), ?NL, Arg, ?NL]
+        [<<"$">>, integer_to_list(iolist_size(Arg)), ?NL, Arg, ?NL]
      end || Arg <- Args],
     ["*", integer_to_list(Count), ?NL, Args1, ?NL].
+

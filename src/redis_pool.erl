@@ -2,31 +2,46 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/1, init/1, handle_call/3, handle_cast/2, 
-	     handle_info/2, terminate/2, code_change/3]).
+-export([start_link/0, start_link/1, init/1, handle_call/3,
+	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([pid/0, expand_pool/1, cycle_pool/1]).
+-export([pid/0, pid/1, expand_pool/1, expand_pool/2,
+         cycle_pool/1, cycle_pool/2, info/0, info/1]).
 
--record(state, {opts=[], key='$end_of_table'}).
+-record(state, {opts=[], key='$end_of_table', restarts=0, tid}).
+
+-define(MAX_RESTARTS, 600).
 
 %% API functions
-start_link(Opts) ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
+start_link() ->
+    start_link(?MODULE).
+
+start_link(Name) when is_atom(Name) ->
+	gen_server:start_link({local, Name}, ?MODULE, [], []).
 
 pid() ->
-    gen_server:call(?MODULE, pid).
+    pid(?MODULE).
 
-expand_pool(NewSize) when is_integer(NewSize) ->
-    case NewSize - ets:info(?MODULE, size) of
-        Additions when Additions > 0 ->
-            gen_server:cast(?MODULE, {add, Additions});
-        _ ->
-            ok
-    end.
+pid(Name) when is_atom(Name) ->
+    gen_server:call(Name, pid).
+
+expand_pool(NewSize) ->
+    expand_pool(?MODULE, NewSize).
+
+expand_pool(Name, NewSize) when is_atom(Name), is_integer(NewSize) ->
+    gen_server:cast(Name, {expand, NewSize}).
 
 cycle_pool(NewOpts) ->
-    gen_server:cast(?MODULE, {update_opts, NewOpts}),
-    [gen_server:cast(Pid, {reconnect, NewOpts}) || {Pid} <- ets:tab2list(?MODULE)].
+    cycle_pool(?MODULE, NewOpts).
+
+cycle_pool(Name, NewOpts) when is_atom(Name), is_list(NewOpts) ->
+    gen_server:cast(Name, {cycle_pool, NewOpts}).
+
+info() ->
+    info(?MODULE).
+
+info(Name) when is_atom(Name) ->
+    gen_server:call(Name, info).
 
 %%====================================================================
 %% gen_server callbacks
@@ -40,11 +55,11 @@ cycle_pool(NewOpts) ->
 %% Description: Initiates the server
 %% @hidden
 %%--------------------------------------------------------------------
-init(Opts) ->
-    ets:new(?MODULE, [set, named_table, protected]),
-    PoolSize = proplists:get_value(pool_size, Opts, 1),
-    [start_client(Opts) || _ <- lists:seq(1, PoolSize)],
-	{ok, #state{opts=Opts}}.
+init([]) ->
+    Tid = ets:new(undefined, [set, protected]),
+    Self = self(),
+    spawn_link(fun() -> clear_restarts(Self) end),
+	{ok, #state{tid=Tid}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -56,18 +71,18 @@ init(Opts) ->
 %% Description: Handling call messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_call(pid, _From, #state{key='$end_of_table'}=State) ->
-    case ets:first(?MODULE) of
+handle_call(pid, _From, #state{key='$end_of_table', tid=Tid}=State) ->
+    case ets:first(Tid) of
         '$end_of_table' ->
             {reply, undefined, State#state{key='$end_of_table'}};
         Pid ->
             {reply, Pid, State#state{key=Pid}}
     end;
 
-handle_call(pid, _From, #state{key=Prev}=State) ->
-    case ets:next(?MODULE, Prev) of
+handle_call(pid, _From, #state{key=Prev, tid=Tid}=State) ->
+    case ets:next(Tid, Prev) of
         '$end_of_table' ->
-            case ets:first(?MODULE) of
+            case ets:first(Tid) of
                 '$end_of_table' ->
                     {reply, undefined, State#state{key='$end_of_table'}};
                 Pid ->
@@ -76,7 +91,10 @@ handle_call(pid, _From, #state{key=Prev}=State) ->
         Pid ->
             {reply, Pid, State#state{key=Pid}}
     end;
-    
+
+handle_call(info, _From, State) ->
+    {reply, State, State};
+
 handle_call(_Msg, _From, State) ->
     {reply, {error, invalid_call}, State}.
 
@@ -87,11 +105,17 @@ handle_call(_Msg, _From, State) ->
 %% Description: Handling cast messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_cast({add, Additions}, State) ->
-    [start_client(State#state.opts) || _ <- lists:seq(1, Additions)],
+handle_cast({expand, NewSize}, State) ->
+    case NewSize - ets:info(State#state.tid, size) of
+        Additions when Additions > 0 ->
+            [start_client(State#state.tid, State#state.opts) || _ <- lists:seq(1, Additions)];
+        _ ->
+            ok
+    end,
     {noreply, State};
 
-handle_cast({update_opts, NewOpts}, State) ->
+handle_cast({cycle_pool, NewOpts}, State) ->
+    [gen_server:cast(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
     {noreply, State#state{opts=NewOpts}};
 
 handle_cast(_Msg, State) ->
@@ -104,6 +128,14 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %% @hidden
 %%--------------------------------------------------------------------
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, #state{restarts=Restarts, tid=Tid}=State) ->
+    ets:delete(Tid, Pid),
+    Restarts < ?MAX_RESTARTS andalso start_client(Tid, State#state.opts),
+    {noreply, State#state{restarts=Restarts+1}};
+
+handle_info(clear_restarts, State) ->
+    {noreply, State#state{restarts=0}};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -129,6 +161,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-start_client(Opts) ->
-    {ok, Pid} = gen_server:start_link(redis, Opts, []),
-    ets:insert(?MODULE, {Pid}).
+start_client(Tid, Opts) ->
+    {ok, Pid} = gen_server:start(redis, Opts, []),
+    MonitorRef = erlang:monitor(process, Pid),
+    ets:insert(Tid, {Pid, MonitorRef}).
+
+clear_restarts(Pid) ->
+    timer:sleep(1000 * 60),
+    Pid ! clear_restarts,
+    clear_restarts(Pid).
