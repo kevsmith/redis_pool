@@ -96,22 +96,9 @@ handle_call({q, Parts}, _From, State) ->
 
 handle_call({reconnect, NewOpts}, _From, State) ->
     State1 = parse_options(NewOpts, #state{}),
-    case connect(State1#state.ip, State1#state.port, State#state.pass) of
-        {ok, Socket} ->
-            disconnect(State#state.socket),
-            {reply, ok, State1#state{socket=Socket}};
-        Error ->
-            {reply, Error, State}
-    end;
-
+    reconnect(State1#state{socket=State#state.socket});
 handle_call(reconnect, _From, State) ->
-    case connect(State#state.ip, State#state.port, State#state.pass) of
-        {ok, Socket} ->
-            disconnect(State#state.socket),
-            {reply, ok, State#state{socket=Socket}};
-        Error ->
-            {reply, Error, State}
-    end.
+    reconnect(State).
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -151,12 +138,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-disconnect(Socket) ->
+disconnect(#state{socket=Socket}) ->
     case catch gen_tcp:close(Socket) of
         {error, _Reason} ->
             pass;
         _ ->
             pass
+    end.
+
+reconnect(State) ->
+    case connect(State#state.ip, State#state.port, State#state.pass) of
+        {ok, Socket} ->
+            disconnect(State),
+            {reply, ok, State#state{socket=Socket}};
+        Error ->
+            {reply, Error, State}
     end.
 
 do_q(Parts, #state{socket=Socket}) ->

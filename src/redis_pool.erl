@@ -24,7 +24,7 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/0, start_link/1, init/1, handle_call/3,
+-export([start_link/0, start_link/1, start_link/2, init/1, handle_call/3,
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -export([pid/0, pid/1, expand_pool/1, expand_pool/2,
@@ -36,10 +36,13 @@
 
 %% API functions
 start_link() ->
-    start_link(?MODULE).
+    start_link(?MODULE, []).
 
-start_link(Name) when is_atom(Name) ->
-	gen_server:start_link({local, Name}, ?MODULE, [], []).
+start_link(Name) ->
+    start_link(Name, []).
+
+start_link(Name, Opts) when is_atom(Name) ->
+	gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
 
 pid() ->
     pid(?MODULE).
@@ -77,11 +80,11 @@ info(Name) when is_atom(Name) ->
 %% Description: Initiates the server
 %% @hidden
 %%--------------------------------------------------------------------
-init([]) ->
+init([Opts]) ->
     Tid = ets:new(undefined, [set, protected]),
     Self = self(),
     spawn_link(fun() -> clear_restarts(Self) end),
-	{ok, #state{tid=Tid}}.
+	{ok, #state{tid=Tid, opts=Opts}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
