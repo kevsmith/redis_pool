@@ -137,7 +137,7 @@ handle_cast({expand, NewSize}, State) ->
     {noreply, State};
 
 handle_cast({cycle_pool, NewOpts}, State) ->
-    [gen_server:cast(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
+    [gen_server:call(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
     {noreply, State#state{opts=NewOpts}};
 
 handle_cast(_Msg, State) ->
