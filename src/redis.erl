@@ -68,7 +68,15 @@ q(Pid, Parts, Retries, Timeout) ->
             end;
 
         {'EXIT', {timeout, C}} ->
+            % Timeout happened. We don't know what's the reason for this
+            % so we reconnect to redis by dying here and then reconnecting
+            % through the pool process. If there are more than MaxRestarts
+            % in X seconds, as set by the pool, we stop restarting to leave
+            % time to redis to catch up with load and then after another
+            % control interval we re-create everything from the application
+            % that uses the pool.
             error_logger:error_msg("Call ~p timed out after ~pms~n", [C, Timeout]),
+            gen_server:cast(Pid, die),
             {error, timeout};
 
         Result ->
@@ -156,12 +164,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%--------------------------------------------------------------------
 disconnect(#state{socket=Socket}) ->
-    case catch gen_tcp:close(Socket) of
-        {error, _Reason} ->
-            pass;
-        _ ->
-            pass
-    end.
+    catch gen_tcp:close(Socket).
 
 reconnect(State) ->
     case connect(State#state.ip, State#state.port, State#state.pass) of

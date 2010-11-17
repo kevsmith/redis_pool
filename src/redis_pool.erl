@@ -31,9 +31,7 @@
          cycle_pool/1, cycle_pool/2, info/0, info/1,
          pool_size/0, pool_size/1]).
 
--record(state, {opts=[], key='$end_of_table', restarts=0, tid}).
-
--define(MAX_RESTARTS, 600).
+-record(state, {opts=[], key='$end_of_table', restarts=0, max_restarts=600, tid}).
 
 %% API functions
 start_link() ->
@@ -42,8 +40,11 @@ start_link() ->
 start_link(Name) ->
     start_link(Name, []).
 
-start_link(Name, Opts) when is_atom(Name) ->
-	gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
+start_link(Name, Opts) ->
+    start_link(Name, Opts, 600, 60*1000).
+
+start_link(Name, Opts, MaxRestarts, Interval) when is_atom(Name) ->
+	gen_server:start_link({local, Name}, ?MODULE, [Opts, MaxRestarts, Interval], []).
 
 pid() ->
     pid(?MODULE).
@@ -87,11 +88,11 @@ info(Name) when is_atom(Name) ->
 %% Description: Initiates the server
 %% @hidden
 %%--------------------------------------------------------------------
-init([Opts]) ->
+init([Opts, MaxRestarts, Interval]) ->
     Tid = ets:new(undefined, [set, protected]),
     Self = self(),
-    spawn_link(fun() -> clear_restarts(Self) end),
-	{ok, #state{tid=Tid, opts=Opts}}.
+    spawn_link(fun() -> clear_restarts(Self, Interval) end),
+	{ok, #state{tid=Tid, max_restarts=MaxRestarts, opts=Opts}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -163,9 +164,10 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, #state{restarts=Restarts, tid=Tid, key=Prev}=State) ->
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info},
+            #state{restarts=Restarts, max_restarts=MaxRestarts, tid=Tid, key=Prev}=State) ->
     ets:delete(Tid, Pid),
-    Restarts < ?MAX_RESTARTS andalso start_client(Tid, State#state.opts),
+    Restarts < MaxRestarts andalso start_client(Tid, State#state.opts),
     % If I'm removing the previous element in the ets tab I need to reset
     % the state of the last key otherwise I'll get badarg over and over
     case Prev == Pid of
@@ -212,7 +214,7 @@ start_client(Tid, Opts) ->
             io:format("Error ~p while trying to connect to ~p~n", [R, Opts])
     end.
 
-clear_restarts(Pid) ->
-    timer:sleep(1000 * 60),
+clear_restarts(Pid, Interval) ->
+    timer:sleep(Interval),
     Pid ! clear_restarts,
-    clear_restarts(Pid).
+    clear_restarts(Pid, Interval).
