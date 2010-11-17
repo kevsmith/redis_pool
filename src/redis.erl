@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
--export([q/1, q/2]).
+-export([q/1, q/2, q/3]).
 
 -define(NL, <<"\r\n">>).
 
@@ -38,24 +38,38 @@ q(Parts) ->
     q(redis_pool, Parts).
 
 q(Name, Parts) ->
+    q(Name, Parts, 5000).
+
+q(Name, Parts, Timeout) ->
     case redis_pool:pid(Name) of
         Pid when is_pid(Pid) ->
-            q(Pid, Parts, 1);
+            q(Pid, Parts, 1, Timeout);
         Error ->
             Error
     end.
 
-q(Pid, Parts, Retries) ->
-    case gen_server:call(Pid, {q, Parts}) of
+q(Pid, Parts, Retries, Timeout) ->
+    %% It can happen that a call is in progress while this Pid dies,
+    %% In that case catch the exception and return it, the caller will
+    %% deal with the unexpected return value. Also it's possible to
+    %% trigger timeouts
+    case catch gen_server:call(Pid, {q, Parts}, Timeout) of
         {error, _} ->
             case Retries > 0 of
                 true ->
-                    io:format("redis reconnecting...~n"),
                     gen_server:call(Pid, reconnect),
-                    q(Pid, Parts, Retries-1);
+                    q(Pid, Parts, Retries-1, Timeout);
                 false ->
+                    % We've tried to reconnect and it failed...
+                    % Let's just give up and remove ourselves from the
+                    % pool.
+                    gen_server:cast(Pid, die),
                     {error, closed}
             end;
+
+        {'EXIT', {timeout, C}} ->
+            error_logger:error_msg("Call ~p timed out after ~pms~n", [C, Timeout]),
+            {error, timeout};
 
         Result ->
             Result
@@ -106,6 +120,8 @@ handle_call(reconnect, _From, State) ->
 %%    {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+handle_cast(die, State) ->
+    {stop, normal, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -125,7 +141,8 @@ handle_info(_Info, State) ->
 %% cleaning up. When it returns, the gen_server terminates with Reason.
 %% The return value is ignored.
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
+    disconnect(State),
     ok.
 
 %%--------------------------------------------------------------------

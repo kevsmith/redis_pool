@@ -28,7 +28,8 @@
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -export([pid/0, pid/1, expand_pool/1, expand_pool/2,
-         cycle_pool/1, cycle_pool/2, info/0, info/1]).
+         cycle_pool/1, cycle_pool/2, info/0, info/1,
+         pool_size/0, pool_size/1]).
 
 -record(state, {opts=[], key='$end_of_table', restarts=0, tid}).
 
@@ -49,6 +50,12 @@ pid() ->
 
 pid(Name) when is_atom(Name) ->
     gen_server:call(Name, pid).
+
+pool_size() ->
+    pool_size(?MODULE).
+
+pool_size(Name) when is_atom(Name) ->
+    gen_server:call(Name, pool_size).
 
 expand_pool(NewSize) ->
     expand_pool(?MODULE, NewSize).
@@ -120,6 +127,9 @@ handle_call(pid, _From, #state{key=Prev, tid=Tid}=State) ->
 handle_call(info, _From, State) ->
     {reply, State, State};
 
+handle_call(pool_size, _From, State) ->
+    {reply, ets:info(State#state.tid, size), State};
+
 handle_call(_Msg, _From, State) ->
     {reply, {error, invalid_call}, State}.
 
@@ -153,10 +163,17 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, #state{restarts=Restarts, tid=Tid}=State) ->
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info}, #state{restarts=Restarts, tid=Tid, key=Prev}=State) ->
     ets:delete(Tid, Pid),
     Restarts < ?MAX_RESTARTS andalso start_client(Tid, State#state.opts),
-    {noreply, State#state{restarts=Restarts+1}};
+    % If I'm removing the previous element in the ets tab I need to reset
+    % the state of the last key otherwise I'll get badarg over and over
+    case Prev == Pid of
+        true ->
+            {noreply, State#state{restarts=Restarts+1, key='$end_of_table'}};
+        false ->
+            {noreply, State#state{restarts=Restarts+1}}
+    end;
 
 handle_info(clear_restarts, State) ->
     {noreply, State#state{restarts=0}};
@@ -187,9 +204,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 start_client(Tid, Opts) ->
-    {ok, Pid} = gen_server:start(redis, Opts, []),
-    MonitorRef = erlang:monitor(process, Pid),
-    ets:insert(Tid, {Pid, MonitorRef}).
+    case catch gen_server:start(redis, Opts, []) of
+        {ok, Pid} ->
+            MonitorRef = erlang:monitor(process, Pid),
+            ets:insert(Tid, {Pid, MonitorRef});
+        R ->
+            io:format("Error ~p while trying to connect to ~p~n", [R, Opts])
+    end.
 
 clear_restarts(Pid) ->
     timer:sleep(1000 * 60),
