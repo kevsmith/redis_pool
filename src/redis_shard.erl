@@ -138,6 +138,8 @@ build_map([], _Interval, _Sequence, Acc) ->
 build_map([Server|Rest], Interval, Sequence, Acc) ->
     build_map(Rest, Interval, Sequence+1, dict:store(Interval*Sequence, Server, Acc)).
 
+generate_map_and_interval([]) ->
+    {ok, dict:new(), ?TOTAL_INTERVAL};
 generate_map_and_interval(Servers) ->
     Interval = (?TOTAL_INTERVAL div erlang:length(Servers))+1,
     Map = build_map(Servers, Interval),

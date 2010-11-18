@@ -65,6 +65,16 @@
     10> redis:q(redis_shard:pool(shard, "foo"), ["set", "foo", "bar"]).
     {ok, <<"OK">>}
 
+## Multiple Pools with Manager
+
+    1> redis_sup:start_link().
+    {ok,<0.33.0>}
+    2> redis_shard:start_link(main, []).
+    {ok,<0.35.0>}
+    3> redis_manager:start_link(main, [{one, [10]}, {two, [10]}, {three, [10]}, {four, [10]}]).
+    {ok,<0.37.0>}
+    4> redis:q(redis_shard:pool(main, "foo"), ["set", "foo", "bar"]).
+    {ok,<<"OK">>}
 
 ## Breakdance/Breakdown
 
