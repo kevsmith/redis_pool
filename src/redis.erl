@@ -54,6 +54,10 @@ q(Pid, Parts, Retries, Timeout) ->
     %% deal with the unexpected return value. Also it's possible to
     %% trigger timeouts
     case catch gen_server:call(Pid, {q, Parts}, Timeout) of
+        {error, Reason} when is_binary(Reason) ->
+            %% genuine Redis error
+            {error, Reason};
+        
         {error, _} ->
             case Retries > 0 of
                 true ->

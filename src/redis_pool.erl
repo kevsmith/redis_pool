@@ -27,8 +27,7 @@
 -export([start_link/0, start_link/1, start_link/2, init/1, handle_call/3,
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([pid/0, pid/1, expand_pool/1, expand_pool/2,
-         cycle_pool/1, cycle_pool/2, info/0, info/1,
+-export([pid/0, pid/1, expand/1, expand/2, cycle/1, cycle/2, info/0, info/1,
          pool_size/0, pool_size/1]).
 
 -record(state, {opts=[], key='$end_of_table', restarts=0, max_restarts=600, tid}).
@@ -50,25 +49,32 @@ pid() ->
     pid(?MODULE).
 
 pid(Name) when is_atom(Name) ->
-    gen_server:call(Name, pid).
-
+    case catch gen_server:call(Name, pid) of
+        {'EXIT', {noproc, _}} ->
+            {error, {not_found, Name}};
+        R ->
+            R
+    end;
+pid(Name) ->
+    {error, {invalid_name, Name}}.
+    
 pool_size() ->
     pool_size(?MODULE).
 
 pool_size(Name) when is_atom(Name) ->
     gen_server:call(Name, pool_size).
 
-expand_pool(NewSize) ->
-    expand_pool(?MODULE, NewSize).
+expand(NewSize) ->
+    expand(?MODULE, NewSize).
 
-expand_pool(Name, NewSize) when is_atom(Name), is_integer(NewSize) ->
+expand(Name, NewSize) when is_atom(Name), is_integer(NewSize) ->
     gen_server:cast(Name, {expand, NewSize}).
 
-cycle_pool(NewOpts) ->
-    cycle_pool(?MODULE, NewOpts).
+cycle(NewOpts) ->
+    cycle(?MODULE, NewOpts).
 
-cycle_pool(Name, NewOpts) when is_atom(Name), is_list(NewOpts) ->
-    gen_server:cast(Name, {cycle_pool, NewOpts}).
+cycle(Name, NewOpts) when is_atom(Name), is_list(NewOpts) ->
+    gen_server:cast(Name, {cycle, NewOpts}).
 
 info() ->
     info(?MODULE).
@@ -150,7 +156,7 @@ handle_cast({expand, NewSize}, State) ->
     end,
     {noreply, State};
 
-handle_cast({cycle_pool, NewOpts}, State) ->
+handle_cast({cycle, NewOpts}, State) ->
     [gen_server:call(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
     {noreply, State#state{opts=NewOpts}};
 

@@ -33,6 +33,7 @@ update_shards(Servers) ->
     update_shards(?MODULE, Servers).
 update_shards(Name, Servers) ->
     gen_server:call(Name, {update_shards, Servers}).
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -119,7 +120,12 @@ get_matching_pool(Index, #state{map=Map, interval=Interval}) ->
     % obtain the right key by dividing the Index by the TOTAL_INTERVAL/POOL_SIZE
     % which in turn we roundup to the bigger number and use it as the
     % key in the Map.
-    dict:find(closest_key(Index, Interval), Map).
+    case dict:find(closest_key(Index, Interval), Map) of
+        {ok, Value} ->
+            Value;
+        Error ->
+            Error
+    end.
 
 closest_key(Index, Interval) ->
     ((Index div Interval) + 1) * Interval.
