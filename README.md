@@ -52,13 +52,13 @@
     {ok,<0.39.0>}
     4> redis_pool:start_link(four). 
     {ok,<0.42.0>}
-    5> redis_pool:expand_pool(one, 10).
+    5> redis_pool:expand(one, 10).
     ok
-    6> redis_pool:expand_pool(two, 10).
+    6> redis_pool:expand(two, 10).
     ok
-    7> redis_pool:expand_pool(three, 10).
+    7> redis_pool:expand(three, 10).
     ok
-    8> redis_pool:expand_pool(four, 10). 
+    8> redis_pool:expand(four, 10). 
     ok
     9> redis_shard:start_link(shard, [one, two, three, four]).
     {ok,<0.91.0>}
