@@ -24,11 +24,11 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/0, start_link/1, start_link/2, init/1, handle_call/3,
+-export([start_link/0, start_link/1, start_link/2, start_link/4, init/1, handle_call/3,
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -export([pid/0, pid/1, expand/1, expand/2, cycle/1, cycle/2, info/0, info/1,
-         pool_size/0, pool_size/1]).
+         pool_size/0, pool_size/1, info/2, stop/0, stop/1]).
 
 -record(state, {opts=[], key='$end_of_table', restarts=0, max_restarts=600, tid}).
 
@@ -43,7 +43,7 @@ start_link(Name, Opts) ->
     start_link(Name, Opts, 600, 60*1000).
 
 start_link(Name, Opts, MaxRestarts, Interval) when is_atom(Name) ->
-	gen_server:start_link({local, Name}, ?MODULE, [Opts, MaxRestarts, Interval], []).
+    gen_server:start_link({local, Name}, ?MODULE, [Opts, MaxRestarts, Interval], []).
 
 pid() ->
     pid(?MODULE).
@@ -81,6 +81,18 @@ info() ->
 
 info(Name) when is_atom(Name) ->
     gen_server:call(Name, info).
+
+info(Name, opts) when is_atom(Name) ->
+    R = info(Name),
+    R#state.opts;
+info(Name, tid) when is_atom(Name) ->
+    R = info(Name),
+    R#state.tid.
+
+stop() ->
+    stop(?MODULE).
+stop(Name) ->
+    gen_server:call(Name, stop).
 
 %%====================================================================
 %% gen_server callbacks
@@ -136,6 +148,9 @@ handle_call(info, _From, State) ->
 
 handle_call(pool_size, _From, State) ->
     {reply, ets:info(State#state.tid, size), State};
+
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 
 handle_call(_Msg, _From, State) ->
     {reply, {error, invalid_call}, State}.
@@ -197,7 +212,8 @@ handle_info(_Info, State) ->
 %% The return value is ignored.
 %% @hidden
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) -> 
+terminate(_Reason, State) ->
+    [gen_server:cast(Pid, die) || {Pid, _} <- ets:tab2list(State#state.tid)],
     ok.
 
 %%--------------------------------------------------------------------
