@@ -103,12 +103,108 @@
 
         Sepcify the db to use.  Default is 0.
 
-    Name represents the name of the pool you are creating, by default
-    it's redis_pool.
+      Name represents the name of the pool you are creating, by default
+      it's redis_pool.
+      
+      MaxRestarts and Interval stop the restart cycle when the
+      connections in the pool die too often, where often is defined as
+      MaxRestarts in Interval.
+
+    redis_pool:expand(NewSize) -> ok
+    redis_pool:expand(Name, NewSize) -> ok
+
+      Types:
+      
+        NewSize = number()
+        
+          Set the connection pool to the given size.
+        
+        Name = atom()
+
+          Send the call to a specific pool. By default redis_pool.
+
+    redis_pool:pool_size() -> number()
+    redis_pool:pool_size(Name) -> number()
     
-    MaxRestarts and Interval stop the restart cycle when the
-    connections in the pool die too often, where often is defined as
-    MaxRestarts in Interval.
+      Types
+      
+        Name = atom()
+      
+      Returns the current number of live connections in the pool.
+
+    redis_pool:pid() -> pid() | {error, term()}
+    redis_pool:pid(Name) -> pid() | {error, term()}
+    
+      Types
+      
+        Name = atom()
+    
+      Return a connection from the specified pool or from the default one.
+    
+    redis_pool:cycle(NewOpts) -> ok
+    redis_pool:cycle(Name, NewOpts) -> ok
+    
+      Types
+      
+        NewOpts = [NewOpt]
+        NewOpt = {atom(), Value}
+        Value = term()
+        Name = atom()
+    
+      Recreate every connection in the pool using the provided NewOpts.
+      NewOpts follows the same rules as in redis_pool:start_link/4.
+      
+      Name specifies the name of the connection pool or redis_pool if not
+      provided.
+    
+    redis_pool:info() -> term()
+    redis_pool:info(Name) -> term()
+    
+      Types
+      
+        Name = atom()
+
+      Returns the current state of the connection pool.
+    
+    redis_shard:start_link(Servers) -> ok | {error, Reason}
+    redis_shard:start_link(Name, Servers) -> ok | {error, Reason}
+    
+      Types
+      
+        Servers = [Server]
+        Server = term()
+        Name = atom()
+
+        Starts a shard manager that splits evenly an md5 interval
+        across the given terms in order.
+        
+        The suggested way of using this is by having each Server be the
+        name of a connection pool. But you can also store additional
+        information. You'll however need to extract the label to the
+        connection pool in order to access it.
+    
+    redis_shard:pool(Key) -> atom() | {error, Reason}
+    redis_shard:pool(Name, Key) -> atom() | {error, Reason}
+    
+      Types
+      
+        Key = number() | list()
+        Name = atom()
+        
+        Returns from the given shard the label that contains the
+        specified key or index.
+    
+    redis_shard:update_shards(Servers) -> ok
+    redis_shard:update_shards(Name, Servers) -> ok
+    
+      Types
+      
+        Servers = [Server]
+        Server = term()
+        Name = atom()
+    
+      Updates the initial configuration and redistributes the shards to
+      new servers. No consistency checks are done at this point.
 
     redis:q(Parts) -> {ok, binary()} | {ok, int()} | {error, binary()}
     redis:q(Name, Parts) -> {ok, binary()} | {ok, int()} | {error, binary()}
