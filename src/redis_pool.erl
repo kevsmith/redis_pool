@@ -233,7 +233,7 @@ start_client(Tid, Opts) ->
             MonitorRef = erlang:monitor(process, Pid),
             ets:insert(Tid, {Pid, MonitorRef});
         R ->
-            io:format("Error ~p while trying to connect to ~p~n", [R, Opts])
+            error_logger:error_msg("Error ~p while trying to connect to ~p~n", [R, Opts])
     end.
 
 clear_restarts(Pid, Interval) ->
