@@ -27,6 +27,8 @@
 -export([init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
+-export([build_request/1]).
+
 -export([q/1, q/2, q/3]).
 
 -define(NL, <<"\r\n">>).
@@ -179,8 +181,11 @@ reconnect(State) ->
             {reply, Error, State}
     end.
 
-do_q(Parts, #state{socket=Socket}) ->
-    send_recv(Socket, build_request(Parts)).
+do_q(Parts, #state{socket=Socket}) when is_list(Parts) ->
+    send_recv(Socket, build_request(Parts));
+
+do_q(Packet, #state{socket=Socket}) when is_binary(Packet) ->
+    send_recv(Socket, Packet).
     
 parse_options([], State) ->
     State;
