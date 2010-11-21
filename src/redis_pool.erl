@@ -27,8 +27,8 @@
 -export([start_link/0, start_link/1, start_link/2, start_link/4, init/1, handle_call/3,
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([pid/0, pid/1, expand/1, expand/2, cycle/1, cycle/2, info/0, info/1,
-         pool_size/0, pool_size/1, info/2, stop/0, stop/1]).
+-export([pid/0, pid/1, expand/1, expand/2, expand/3, cycle/1, cycle/2, cycle/3,
+         info/0, info/1, pool_size/0, pool_size/1, info/2, stop/0, stop/1]).
 
 -record(state, {opts=[], key='$end_of_table', restarts=0, max_restarts=600, tid}).
 
@@ -67,14 +67,20 @@ pool_size(Name) when is_atom(Name) ->
 expand(NewSize) ->
     expand(?MODULE, NewSize).
 
-expand(Name, NewSize) when is_atom(Name), is_integer(NewSize) ->
-    gen_server:call(Name, {expand, NewSize}).
+expand(Name, NewSize) ->
+    expand(Name, NewSize, 8000).
+
+expand(Name, NewSize, Timeout) when is_atom(Name), is_integer(NewSize), is_integer(Timeout) ->
+    gen_server:call(Name, {expand, NewSize}, Timeout).
 
 cycle(NewOpts) ->
     cycle(?MODULE, NewOpts).
 
-cycle(Name, NewOpts) when is_atom(Name), is_list(NewOpts) ->
-    gen_server:call(Name, {cycle, NewOpts}).
+cycle(Name, NewOpts) ->
+    cycle(Name, NewOpts, 8000).
+
+cycle(Name, NewOpts, Timeout) when is_atom(Name), is_list(NewOpts), is_integer(Timeout) ->
+    gen_server:call(Name, {cycle, NewOpts}, Timeout).
 
 info() ->
     info(?MODULE).
