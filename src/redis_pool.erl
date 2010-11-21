@@ -68,13 +68,13 @@ expand(NewSize) ->
     expand(?MODULE, NewSize).
 
 expand(Name, NewSize) when is_atom(Name), is_integer(NewSize) ->
-    gen_server:cast(Name, {expand, NewSize}).
+    gen_server:call(Name, {expand, NewSize}).
 
 cycle(NewOpts) ->
     cycle(?MODULE, NewOpts).
 
 cycle(Name, NewOpts) when is_atom(Name), is_list(NewOpts) ->
-    gen_server:cast(Name, {cycle, NewOpts}).
+    gen_server:call(Name, {cycle, NewOpts}).
 
 info() ->
     info(?MODULE).
@@ -143,6 +143,19 @@ handle_call(pid, _From, #state{key=Prev, tid=Tid}=State) ->
             {reply, Pid, State#state{key=Pid}}
     end;
 
+handle_call({expand, NewSize}, _From, State) ->
+    case NewSize - ets:info(State#state.tid, size) of
+        Additions when Additions > 0 ->
+            [start_client(State#state.tid, State#state.opts) || _ <- lists:seq(1, Additions)];
+        _ ->
+            ok
+    end,
+    {reply, ok, State};
+
+handle_call({cycle, NewOpts}, _From, State) ->
+    [gen_server:call(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
+    {reply, ok, State#state{opts=NewOpts}};
+
 handle_call(info, _From, State) ->
     {reply, State, State};
 
@@ -162,19 +175,6 @@ handle_call(_Msg, _From, State) ->
 %% Description: Handling cast messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_cast({expand, NewSize}, State) ->
-    case NewSize - ets:info(State#state.tid, size) of
-        Additions when Additions > 0 ->
-            [start_client(State#state.tid, State#state.opts) || _ <- lists:seq(1, Additions)];
-        _ ->
-            ok
-    end,
-    {noreply, State};
-
-handle_cast({cycle, NewOpts}, State) ->
-    [gen_server:call(Pid, {reconnect, NewOpts}) || {Pid, _} <- ets:tab2list(State#state.tid)],
-    {noreply, State#state{opts=NewOpts}};
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
