@@ -23,7 +23,7 @@ add_pool(Name, Opts, MaxRestarts, Interval, Size) ->
         _ ->
             cycle_if_needed(Name, redis_pool:info(Name, opts), Opts)
     end,
-    redis_pool:expand(Name, Size).
+    redis_pool:expand(Name, Size, 30 * 1000).
 
 remove_pool(Name) ->
     case redis_pool:pid(Name) of
