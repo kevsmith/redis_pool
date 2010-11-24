@@ -152,7 +152,20 @@ handle_call(pid, _From, #state{key=Prev, tid=Tid}=State) ->
 handle_call({expand, NewSize}, _From, State) ->
     case NewSize - ets:info(State#state.tid, size) of
         Additions when Additions > 0 ->
-            [start_client(State#state.tid, State#state.opts) || _ <- lists:seq(1, Additions)];
+            Self = self(),
+            Pids = [spawn_link(
+                fun() ->
+                    case start_client(State#state.opts) of
+                        {ok, ClientPid} -> Self ! {self(), spawned, ClientPid};
+                        _ -> ok
+                    end
+                end) || _ <- lists:seq(1, Additions)],
+            [receive
+                {Pid, spawned, ClientPid} ->
+                    MonitorRef = erlang:monitor(process, ClientPid),
+                    ets:insert(State#state.tid, {ClientPid, MonitorRef})
+            end || Pid <- Pids],
+            ok;
         _ ->
             ok
     end,
@@ -234,12 +247,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 start_client(Tid, Opts) ->
-    case catch gen_server:start(redis, Opts, []) of
+    case start_client(Opts) of
         {ok, Pid} ->
             MonitorRef = erlang:monitor(process, Pid),
             ets:insert(Tid, {Pid, MonitorRef});
-        R ->
-            error_logger:error_msg("Error ~p while trying to connect to ~p~n", [R, Opts])
+        Err ->
+            Err
+    end.
+
+start_client(Opts) ->
+    case catch gen_server:start(redis, Opts, []) of
+        {ok, Pid} ->
+            {ok, Pid};
+        Err ->
+            error_logger:error_msg("Error ~p while trying to connect to ~p~n", [Err, Opts]),
+            Err
     end.
 
 clear_restarts(Pid, Interval) ->
