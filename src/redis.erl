@@ -42,13 +42,16 @@ q(Parts) ->
 q(Name, Parts) ->
     q(Name, Parts, 5000).
 
-q(Name, Parts, Timeout) ->
+q(Name, Parts, Timeout) when is_atom(Name) ->
     case redis_pool:pid(Name) of
         Pid when is_pid(Pid) ->
             q(Pid, Parts, 1, Timeout);
         Error ->
             Error
-    end.
+    end;
+
+q(Pid, Parts, Timeout) when is_pid(Pid) ->
+    q(Pid, Parts, 1, Timeout).
 
 q(Pid, Parts, Retries, Timeout) ->
     %% It can happen that a call is in progress while this Pid dies,
