@@ -121,8 +121,12 @@ init(Opts) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call({q, Parts}, _From, State) ->
-    Result = do_q(Parts, State),
-    {reply, Result, State};
+    case do_q(Parts, State) of
+        {error, Reason} ->
+            {stop, Reason, {error, Reason}, State};
+        Result ->
+            {reply, Result, State}
+    end;
 
 handle_call({reconnect, NewOpts}, _From, State) ->
     State1 = parse_options(NewOpts, #state{}),
