@@ -149,5 +149,5 @@ generate_map_and_interval([]) ->
     {ok, dict:new(), ?TOTAL_INTERVAL};
 generate_map_and_interval(Servers) ->
     Interval = (?TOTAL_INTERVAL div erlang:length(Servers))+1,
-    Map = build_map(Servers, Interval),
+    Map = build_map(lists:sort(Servers), Interval),
     {ok, Map, Interval}.
