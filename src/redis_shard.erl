@@ -8,6 +8,9 @@
 %% API
 -export([pool/1, pool/2, update_shards/1, update_shards/2]).
 
+%% Util funcs
+-export([generate_map_and_interval/1, get_matching_pool/3, key_to_index/1]).
+
 -record(state, {interval, map}).
 
 % 2**128 of md5 interval
@@ -26,7 +29,7 @@ pool(Arg) ->
 pool(Name, Index) when is_integer(Index) ->
     gen_server:call(Name, {pool, Index});
 pool(Name, Key) ->
-    <<Index:128/big-unsigned-integer>> = crypto:md5(Key),
+    Index = key_to_index(Key),
     gen_server:call(Name, {pool, Index}).
 
 update_shards(Servers) ->
@@ -65,8 +68,8 @@ init([Servers]) ->
 handle_call({update_shards, Servers}, _From, State) ->
     {ok, Map, Interval} = generate_map_and_interval(Servers),
     {reply, ok, State#state{map=Map, interval=Interval}};
-handle_call({pool, Index}, _From, State) ->
-    {reply, get_matching_pool(Index, State), State};
+handle_call({pool, Index}, _From, #state{map=Map, interval=Interval}=State) ->
+    {reply, get_matching_pool(Index, Map, Interval), State};
 
 handle_call(_Msg, _From, State) ->
     {reply, {error, invalid_call}, State}.
@@ -114,7 +117,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
-get_matching_pool(Index, #state{map=Map, interval=Interval}) ->
+key_to_index(Key) ->
+    <<Index:128/big-unsigned-integer>> = crypto:md5(Key),
+    Index.
+
+get_matching_pool(Index, Map, Interval) ->
     % Assumption is that the interval is divided evenly among the pools.
     % This means that we don't need to search for the pool, but we can
     % obtain the right key by dividing the Index by the TOTAL_INTERVAL/POOL_SIZE
