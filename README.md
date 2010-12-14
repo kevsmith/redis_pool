@@ -2,12 +2,15 @@
 
 ## Synopsis
 
-  minimalistic [redis](http://code.google.com/p/redis/) client for erlang.
-  
-  Derived from:
-  
-   - https://github.com/bmizerany/redis-erl/
-   - https://github.com/JacobVorreuter/redis_pool/
+minimalistic [redis](http://code.google.com/p/redis/) client for erlang.  
+
+Derived from:  
+
+* <https://github.com/bmizerany/redis-erl/>  
+
+Active forks:  
+
+* <https://github.com/dialtone/redis_pool>  
 
 ## Overview
 
@@ -241,17 +244,9 @@
           Specify a timeout in ms after which the call can be considered
           failed and the connection can be recycled.
 
-## Contribute
-
-I'm very open to patches!  Help is greatly appreciated.
-
-- Fork this repo
-- Add an issue to this repos issues with a link to you commit/compare-view
-- I'll get to it as soon as possible
-
 ## LICENSE
-Copyright (c) 2010 Blake Mizerany  
 Copyright (c) 2010 Jacob Vorreuter <jacob.vorreuter@gmail.com>  
+Copyright (c) 2010 Blake Mizerany  <blake.mizerany@gmail.com>  
 Copyright (c) 2010 Valentino Volonghi <valentino@adroll.com>  
 
 Permission is hereby granted, free of charge, to any person  
