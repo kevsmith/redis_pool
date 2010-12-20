@@ -24,14 +24,14 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/0, start_link/1, start_link/2, start_link/4, init/1, handle_call/3,
+-export([start_link/0, start_link/1, start_link/2, init/1, handle_call/3,
 	     handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([start_client/0, start_client/1, start_client/2, pid/0, pid/1,
+-export([pid/0, pid/1, add_pool/1, add_pool/2, add_pool/3, remove_pool/1, register/2,
          expand/1, expand/2, expand/3, cycle/1, cycle/2, cycle/3,
          info/0, info/1, pool_size/0, pool_size/1, info/2, stop/0, stop/1]).
 
--record(state, {opts=[], key='$end_of_table', restarts=0, max_restarts=600, tid}).
+-record(state, {opts=[], key='$end_of_table', tid}).
 
 -define(TIMEOUT, 8000).
 
@@ -43,19 +43,36 @@ start_link(Name) ->
     start_link(Name, []).
 
 start_link(Name, Opts) ->
-    start_link(Name, Opts, 600, 60*1000).
+    gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
 
-start_link(Name, Opts, MaxRestarts, Interval) when is_atom(Name) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Opts, MaxRestarts, Interval], []).
+register(Name, Pid) ->
+    gen_server:cast(Name, {register, Pid}).
 
-start_client() ->
-    start_client(?MODULE).
+cycle_if_needed(_Name, Opts, Opts) ->
+    ok;
+cycle_if_needed(Name, _Opts, NewOpts) ->
+    cycle(Name, NewOpts).
 
-start_client(Name) ->
-    start_client(Name, ?TIMEOUT).
+add_pool(Size) ->
+    add_pool(redis_pool, [], Size).
+add_pool(Name, Size) ->
+    add_pool(Name, [], Size).
+add_pool(Name, Opts, Size) ->
+    case pid(Name) of
+        {error, {not_found, Name}} ->
+            {ok, _} = redis_pool_sup:start_child(Name, Opts);
+        _ ->
+            cycle_if_needed(Name, info(Name, opts), Opts)
+    end,
+    expand(Name, Size, 30 * 1000).
 
-start_client(Name, Timeout) ->
-    gen_server:call(Name, start_client, Timeout).
+remove_pool(Name) ->
+    case pid(Name) of
+        {error, {not_found, Name}} ->
+            ok;
+        _ ->
+            stop(Name)
+    end.
 
 pid() ->
     pid(?MODULE).
@@ -124,11 +141,9 @@ stop(Name) ->
 %% Description: Initiates the server
 %% @hidden
 %%--------------------------------------------------------------------
-init([Opts, MaxRestarts, Interval]) ->
+init([Opts]) ->
     Tid = ets:new(undefined, [set, protected]),
-    Self = self(),
-    spawn_link(fun() -> clear_restarts(Self, Interval) end),
-	{ok, #state{tid=Tid, max_restarts=MaxRestarts, opts=Opts}}.
+    {ok, #state{tid=Tid, opts=Opts}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -140,10 +155,6 @@ init([Opts, MaxRestarts, Interval]) ->
 %% Description: Handling call messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_call(start_client, {From, _Mref}, #state{tid=Tid, opts=Opts}=State) ->
-    Res = start_client1(Tid, Opts, From),
-    {reply, Res, State};
-
 handle_call(pid, _From, #state{key='$end_of_table', tid=Tid}=State) ->
     case ets:first(Tid) of
         '$end_of_table' ->
@@ -168,19 +179,7 @@ handle_call(pid, _From, #state{key=Prev, tid=Tid}=State) ->
 handle_call({expand, NewSize}, _From, State) ->
     case NewSize - ets:info(State#state.tid, size) of
         Additions when Additions > 0 ->
-            Self = self(),
-            Pids = [spawn_link(
-                fun() ->
-                    case start_client1(State#state.opts) of
-                        {ok, ClientPid} -> Self ! {self(), spawned, ClientPid};
-                        _ -> ok
-                    end
-                end) || _ <- lists:seq(1, Additions)],
-            [receive
-                {Pid, spawned, ClientPid} ->
-                    _MonitorRef = erlang:monitor(process, ClientPid),
-                    ets:insert(State#state.tid, {ClientPid, undefined})
-            end || Pid <- Pids],
+            [redis_pid_sup:start_child(self(), State#state.opts) || _ <- lists:seq(1, Additions)],
             ok;
         _ ->
             ok
@@ -210,6 +209,10 @@ handle_call(_Msg, _From, State) ->
 %% Description: Handling cast messages
 %% @hidden
 %%--------------------------------------------------------------------
+handle_cast({register, Pid}, #state{tid=Tid}=State) ->
+    ets:insert(Tid, {Pid, undefined}),
+    {noreply, State};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -220,13 +223,12 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %% @hidden
 %%--------------------------------------------------------------------
-handle_info({'DOWN', _MonitorRef, process, Pid, _Info}=Msg,
-            #state{restarts=Restarts, max_restarts=MaxRestarts, tid=Tid, key=Prev}=State) ->
+handle_info({'DOWN', _MonitorRef, process, Pid, _Info}=Msg, #state{tid=Tid, key=Prev}=State) ->
     case ets:lookup(Tid, Pid) of
         [{Pid, Caller}] when is_pid(Caller) ->
             Caller ! Msg;
         _ ->
-            Restarts < MaxRestarts andalso start_client1(Tid, State#state.opts)
+            ok
     end,
     ets:delete(Tid, Pid),
 
@@ -234,13 +236,10 @@ handle_info({'DOWN', _MonitorRef, process, Pid, _Info}=Msg,
     % the state of the last key otherwise I'll get badarg over and over
     case Prev == Pid of
         true ->
-            {noreply, State#state{restarts=Restarts+1, key='$end_of_table'}};
+            {noreply, State#state{key='$end_of_table'}};
         false ->
-            {noreply, State#state{restarts=Restarts+1}}
+            {noreply, State}
     end;
-
-handle_info(clear_restarts, State) ->
-    {noreply, State#state{restarts=0}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -268,29 +267,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-start_client1(Tid, Opts) ->
-    start_client1(Tid, Opts, undefined).
-
-start_client1(Tid, Opts, CallerPid) ->
-    case start_client1(Opts) of
-        {ok, Pid} ->
-            _MonitorRef = erlang:monitor(process, Pid),
-            ets:insert(Tid, {Pid, CallerPid}),
-            {ok, Pid};
-        Err ->
-            Err
-    end.
-
-start_client1(Opts) ->
-    case catch gen_server:start(redis, Opts, []) of
-        {ok, Pid} ->
-            {ok, Pid};
-        Err ->
-            error_logger:error_msg("Error ~p while trying to connect to ~p~n", [Err, Opts]),
-            Err
-    end.
-
-clear_restarts(Pid, Interval) ->
-    timer:sleep(Interval),
-    Pid ! clear_restarts,
-    clear_restarts(Pid, Interval).
