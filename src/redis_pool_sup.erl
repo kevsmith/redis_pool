@@ -20,17 +20,19 @@
 %% WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
--module(redis_sup).
+-module(redis_pool_sup).
 -behaviour(supervisor).
 
 %% Supervisor callbacks
--export([init/1, start_link/0]).
+-export([init/1, start_link/0, start_child/2]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+start_child(Name, Opts) ->
+    supervisor:start_child(?MODULE, [Name, Opts]).
+
 init([]) ->
-    {ok, {{one_for_one, 100, 1}, [
-        {redis_pool_sup, {redis_pool_sup, start_link, []}, permanent, 10000, worker, [redis_pool_sup]},
-        {redis_pid_sup, {redis_pid_sup, start_link, []}, permanent, 10000, worker, [redis_pid_sup]}
+    {ok, {{simple_one_for_one, 100000, 1}, [
+        {undefined, {redis_pool, start_link, []}, transient, 10000, worker, [redis_pool]}
     ]}}.

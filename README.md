@@ -24,7 +24,7 @@ Active forks:
 
     0> redis_pool:start_link().  % connect to default redis port on localhost
     {ok,<0.33.0>}
-    1> redis_pool:expand_pool(10).
+    1> redis_pool:expand(10).
     ok
     2> redis:q(["set", "foo", "bar"]).
     {ok,<<"OK">>}

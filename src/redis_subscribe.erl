@@ -20,17 +20,22 @@
 %% WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
--module(redis_sup).
--behaviour(supervisor).
+-module(redis_subscribe).
+-export([connect/3]).
 
-%% Supervisor callbacks
--export([init/1, start_link/0]).
+connect(Key, Opts, {M,F,A}=Callback) when is_binary(Key), is_list(Opts), is_atom(M), is_atom(F), is_list(A) ->
+    connect1(Key, Opts, Callback);
+connect(Key, Opts, Callback) when is_binary(Key), is_list(Opts), is_function(Callback) ->
+    connect1(Key, Opts, Callback);
+connect(Key, Opts, {Fun, Args}=Callback) when is_binary(Key), is_list(Opts), is_function(Fun), is_list(Args) ->
+    connect1(Key, Opts, Callback).
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-init([]) ->
-    {ok, {{one_for_one, 100, 1}, [
-        {redis_pool_sup, {redis_pool_sup, start_link, []}, permanent, 10000, worker, [redis_pool_sup]},
-        {redis_pid_sup, {redis_pid_sup, start_link, []}, permanent, 10000, worker, [redis_pid_sup]}
-    ]}}.
+connect1(Key, Opts, Callback) ->
+    case redis_pid_sup:start_child(Opts) of
+        {ok, Pid} ->
+            ok = redis:subscribe(Pid, Key, Callback),
+            {ok, Pid};
+        Err ->
+            Err
+    end.
+    
