@@ -80,15 +80,16 @@ remove_pool(Name) ->
 pid() ->
     pid(?MODULE).
 
-pid(Name) when is_atom(Name) ->
-    case catch gen_server:call(Name, pid) of
+pid(Pool) when is_atom(Pool); is_pid(Pool) ->
+    case catch gen_server:call(Pool, pid) of
         {'EXIT', {noproc, _}} ->
-            {error, {not_found, Name}};
+            {error, {not_found, Pool}};
         R ->
             R
     end;
-pid(Name) ->
-    {error, {invalid_name, Name}}.
+
+pid(Pool) ->
+    {error, {invalid_name, Pool}}.
     
 pool_size() ->
     pool_size(?MODULE).
