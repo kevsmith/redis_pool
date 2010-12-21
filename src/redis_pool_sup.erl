@@ -24,10 +24,13 @@
 -behaviour(supervisor).
 
 %% Supervisor callbacks
--export([init/1, start_link/0, start_child/2]).
+-export([init/1, start_link/0, start_child/1, start_child/2]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+start_child(Opts) ->
+    supervisor:start_child(?MODULE, [Opts]).
 
 start_child(Name, Opts) ->
     supervisor:start_child(?MODULE, [Name, Opts]).
