@@ -39,10 +39,13 @@
 start_link() ->
     start_link(?MODULE, []).
 
-start_link(Name) ->
-    start_link(Name, []).
+start_link(Name) when is_atom(Name) ->
+    start_link(Name, []);
 
-start_link(Name, Opts) ->
+start_link(Opts) when is_list(Opts) ->
+    gen_server:start_link(?MODULE, [Opts], []).
+
+start_link(Name, Opts) when is_atom(Name), is_list(Opts) ->
     gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
 
 register(Name, Pid) ->
