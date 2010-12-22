@@ -94,7 +94,7 @@ pid(Pool) ->
 pool_size() ->
     pool_size(?MODULE).
 
-pool_size(Name) when is_atom(Name) ->
+pool_size(Name) ->
     gen_server:call(Name, pool_size).
 
 expand(NewSize) ->
@@ -103,7 +103,7 @@ expand(NewSize) ->
 expand(Name, NewSize) ->
     expand(Name, NewSize, ?TIMEOUT).
 
-expand(Name, NewSize, Timeout) when is_atom(Name), is_integer(NewSize), is_integer(Timeout) ->
+expand(Name, NewSize, Timeout) when is_integer(NewSize), is_integer(Timeout) ->
     gen_server:call(Name, {expand, NewSize}, Timeout).
 
 cycle(NewOpts) ->
@@ -112,19 +112,19 @@ cycle(NewOpts) ->
 cycle(Name, NewOpts) ->
     cycle(Name, NewOpts, ?TIMEOUT).
 
-cycle(Name, NewOpts, Timeout) when is_atom(Name), is_list(NewOpts), is_integer(Timeout) ->
+cycle(Name, NewOpts, Timeout) when is_list(NewOpts), is_integer(Timeout) ->
     gen_server:call(Name, {cycle, NewOpts}, Timeout).
 
 info() ->
     info(?MODULE).
 
-info(Name) when is_atom(Name) ->
+info(Name) ->
     gen_server:call(Name, info).
 
-info(Name, opts) when is_atom(Name) ->
+info(Name, opts) ->
     R = info(Name),
     R#state.opts;
-info(Name, tid) when is_atom(Name) ->
+info(Name, tid) ->
     R = info(Name),
     R#state.tid.
 
