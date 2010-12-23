@@ -24,22 +24,13 @@
 -behaviour(supervisor).
 
 %% Supervisor callbacks
--export([init/1, start_child/1, start_child/2, start_link/0]).
+-export([init/1, start_child/2, start_link/0]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-start_child(Opts) ->
-    supervisor:start_child(?MODULE, [Opts]).
-
 start_child(Pool, Opts) ->
-    case supervisor:start_child(?MODULE, [Opts]) of
-        {ok, Pid} ->
-            redis_pool:register(Pool, Pid),
-            {ok, Pid};
-        Err ->
-            Err
-    end.
+    supervisor:start_child(?MODULE, [Pool, Opts]).
 
 init([]) ->    
     {ok, {{simple_one_for_one, 100000, 1}, [

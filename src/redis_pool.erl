@@ -214,6 +214,7 @@ handle_call(_Msg, _From, State) ->
 %% @hidden
 %%--------------------------------------------------------------------
 handle_cast({register, Pid}, #state{tid=Tid}=State) ->
+    erlang:monitor(process, Pid),
     ets:insert(Tid, {Pid, undefined}),
     {noreply, State};
 

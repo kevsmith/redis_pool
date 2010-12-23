@@ -24,7 +24,7 @@
 -behaviour(gen_server).
 
 %% gen_server callbacks
--export([start_link/1, init/1, handle_call/3, handle_cast/2, 
+-export([start_link/2, init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
 -export([build_request/1, connect/3, stop/1]).
@@ -38,8 +38,8 @@
 -define(TIMEOUT, 5000).
 
 %% API functions
-start_link(Opts) ->
-    gen_server:start(?MODULE, Opts, []).
+start_link(Pool, Opts) ->
+    gen_server:start_link(?MODULE, [Pool, Opts], []).
 
 q(Parts) ->
     q(redis_pool, Parts).
@@ -87,10 +87,11 @@ stop(Pid) ->
 %%    {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init(Opts) ->
+init([Pool, Opts]) ->
     State = parse_options(Opts, #state{}),
     case connect(State#state.ip, State#state.port, State#state.pass) of
         {ok, Socket} ->
+            Pool =/= undefined andalso redis_pool:register(Pool, self()),
             {ok, State#state{socket=Socket}};
         Error ->
             {stop, Error}
@@ -171,10 +172,10 @@ handle_info({tcp, _Socket, Packet}, #state{callback=Callback, buffer=[_, BinKey,
     <<Msg:SizeMsg/binary, "\r\n">> = Packet,
     case Callback of
         {M,F,A} -> apply(M, F, A ++ [{message, Key, Msg}]);
-        {Fun, Args} -> Fun(Args ++ [{message, Key, Msg}]);
+        {Fun, Args} -> apply(Fun, Args ++ [{message, Key, Msg}]);
         Fun -> Fun({message, Key, Msg})
     end,
-    {noreply, State};
+    {noreply, State#state{buffer=[]}};
 
 handle_info({tcp, _Socket, Packet}, #state{buffer=Buffer}=State) ->
     {noreply, State#state{buffer=[Packet|Buffer]}};
