@@ -27,7 +27,7 @@
 -export([start_link/2, init/1, handle_call/3, handle_cast/2, 
          handle_info/2, terminate/2, code_change/3]).
 
--export([build_request/1, connect/3, stop/1]).
+-export([build_request/1, connect/3, send_recv/3, stop/1]).
 
 -export([q/1, q/2, q/3, subscribe/3]).
 
