@@ -79,6 +79,44 @@ Active forks:
     4> redis:q(redis_shard:pool(main, "foo"), ["set", "foo", "bar"]).
     {ok,<<"OK">>}
 
+## Pub/Sub
+
+    %% the standard query function can be used to publish data
+    redis:q([<<"PUBLISH">>, Key, Value])
+
+      Types:
+
+        Key, Value = binary()
+
+    %% the connect method starts a supervised redis child pid with a
+    %% socket open to the redis server in active mode
+    redis_subscribe:connect(Key, Opts, Callback) -> {ok, Pid}
+
+      Types:
+
+        Key = binary()
+        Opts = list()
+        Callback = {M,F,A} | fun() | {fun(), A}
+        M = atom()
+        F = atom()
+        A = list()
+        Pid = pid()
+
+    1> redis_pool:add_pool(1).
+    ok
+    2> redis:q([<<"PUBLISH">>, <<"foo">>, <<"sandwich">>]).
+    {ok,0}
+    3> redis_subscribe:connect(<<"foo">>, [], fun(Val) -> io:format("recv'd ~p~n", [Val]) end).
+    {ok,<0.65.0>}
+    4> redis:q([<<"PUBLISH">>, <<"foo">>, <<"sandwich">>]).
+    recv'd {message,<<"foo">>,<<"sandwich">>}
+    {ok,1}
+    5> redis_subscribe:connect(<<"bar">>, [], {fun(Arg, Val) -> io:format("recv'd ~p, additional arg: ~p~n", [Val, Arg]) end, [myarg]}).
+    {ok,<0.68.0>}
+    6> redis:q([<<"PUBLISH">>, <<"bar">>, <<"birthday cake">>]).
+    recv'd {message,<<"bar">>,<<"birthday cake">>}, additional arg: myarg
+    {ok,1}
+
 ## Breakdance/Breakdown
 
     redis_pool:start_link() -> ok | {error, Reason}
